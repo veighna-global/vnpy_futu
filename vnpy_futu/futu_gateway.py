@@ -1,19 +1,17 @@
+import pandas as pd
 from copy import copy
 from datetime import datetime
 from threading import Thread
 from time import sleep
-from typing import Any, Dict, List, Set
-from futu.trade.trade_query import AccTradingInfoQuery
-import pytz
+from typing import Any, Dict, List, Set, Tuple, Union
 
-from vnpy.event import EventEngine
 from futu import (
     ModifyOrderOp,
     TrdSide,
     TrdEnv,
-    OpenHKTradeContext,
+    TrdMarket,
+    KLType,
     OpenQuoteContext,
-    OpenUSTradeContext,
     OrderBookHandlerBase,
     OrderStatus,
     OrderType,
@@ -21,23 +19,36 @@ from futu import (
     RET_OK,
     StockQuoteHandlerBase,
     TradeDealHandlerBase,
-    TradeOrderHandlerBase
+    TradeOrderHandlerBase,
+    OpenSecTradeContext,
+    OpenFutureTradeContext
 )
 
-from vnpy.trader.constant import Direction, Exchange, Product, Status
-from vnpy.trader.event import EVENT_TIMER
+from vnpy.event import EventEngine
+from vnpy.trader.constant import (
+    Direction,
+    Exchange,
+    Offset,
+    Product,
+    Status,
+    Interval
+)
 from vnpy.trader.gateway import BaseGateway
 from vnpy.trader.object import (
     TickData,
     OrderData,
     TradeData,
+    BarData,
     AccountData,
     ContractData,
     PositionData,
     SubscribeRequest,
     OrderRequest,
-    CancelRequest
+    CancelRequest,
+    HistoryRequest
 )
+from vnpy.trader.event import EVENT_TIMER
+from vnpy.trader.utility import ZoneInfo
 
 
 # 委托状态映射
@@ -59,7 +70,12 @@ DIRECTION_VT2FUTU: Dict[Direction, TrdSide] = {
     Direction.LONG: TrdSide.BUY,
     Direction.SHORT: TrdSide.SELL,
 }
-DIRECTION_FUTU2VT: Dict[TrdSide, Direction] = {v: k for k, v in DIRECTION_VT2FUTU.items()}
+DIRECTION_FUTU2VT: Dict[TrdSide, Tuple] = {
+    TrdSide.BUY: (Direction.LONG, Offset.OPEN),
+    TrdSide.SELL: (Direction.SHORT, Offset.OPEN),
+    TrdSide.BUY_BACK: (Direction.LONG, Offset.CLOSE),
+    TrdSide.SELL_SHORT: (Direction.SHORT, Offset.CLOSE),
+}
 
 # 交易所映射
 EXCHANGE_VT2FUTU: Dict[Exchange, str] = {
@@ -76,33 +92,36 @@ PRODUCT_VT2FUTU: Dict[Product, str] = {
     Product.ETF: "ETF",
     Product.WARRANT: "WARRANT",
     Product.BOND: "BOND",
+    Product.FUTURES: "FUTURE"
 }
 
+
 # 其他常量
-CHINA_TZ = pytz.timezone("Asia/Shanghai")       # 中国时区
+CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
 
 class FutuGateway(BaseGateway):
     """
     vn.py用于对接富途证券的交易接口。
     """
+    default_name: str = "FUTU"
 
     default_setting: Dict[str, Any] = {
         "密码": "",
         "地址": "127.0.0.1",
         "端口": 11111,
-        "市场": ["HK", "US"],
+        "市场": ["HK", "US", "HK_FUTURE"],
         "环境": [TrdEnv.REAL, TrdEnv.SIMULATE],
     }
 
     exchanges: List[str]  = list(EXCHANGE_FUTU2VT.values())
 
-    def __init__(self, event_engine: EventEngine, gateway_name: str = "FUTU") -> None:
+    def __init__(self, event_engine: EventEngine, gateway_name: str) -> None:
         """构造函数"""
         super().__init__(event_engine, gateway_name)
 
         self.quote_ctx: OpenQuoteContext = None
-        self.trade_ctx: OpenHKTradeContext = None
+        self.trade_ctx: Union[OpenSecTradeContext, OpenFutureTradeContext] = None
 
         self.host: str = ""
         self.port: int = 0
@@ -117,7 +136,7 @@ class FutuGateway(BaseGateway):
         self.thread: Thread = Thread(target=self.query_data)
 
         self.count: int = 0
-        self.interval: int = 1
+        self.interval: int = 3
         self.query_funcs: list = [self.query_account, self.query_position]
 
     def connect(self, setting: dict) -> None:
@@ -192,10 +211,12 @@ class FutuGateway(BaseGateway):
 
     def connect_trade(self) -> None:
         """连接交易服务端"""
-        if self.market == "US":
-            self.trade_ctx: OpenUSTradeContext = OpenUSTradeContext(self.host, self.port)
-        else:
-            self.trade_ctx: OpenUSTradeContext = OpenHKTradeContext(self.host, self.port)
+        if self.market =="HK":
+            self.trade_ctx = OpenSecTradeContext(filter_trdmarket=TrdMarket.HK, host=self.host, port=self.port,)
+        elif self.market == "US":
+            self.trade_ctx =OpenSecTradeContext(filter_trdmarket=TrdMarket.US, host=self.host, port=self.port,)
+        elif self.market == "HK_FUTURE":
+            self.trade_ctx = OpenFutureTradeContext(host=self.host, port=self.port)
 
         class OrderHandler(TradeOrderHandlerBase):
             gateway: FutuGateway = self
@@ -287,9 +308,15 @@ class FutuGateway(BaseGateway):
 
     def query_contract(self) -> None:
         """查询合约"""
+        # get_stock_basicinfo 是没有区分future的， 区分了地区
+        if self.market in ["HK", "HK_FUTURE"]:
+            market = "HK"
+        else:
+            market = self.market
+
         for product, futu_product in PRODUCT_VT2FUTU.items():
             code, data = self.quote_ctx.get_stock_basicinfo(
-                self.market, futu_product
+                market, futu_product
             )
 
             if code:
@@ -305,6 +332,7 @@ class FutuGateway(BaseGateway):
                     product=product,
                     size=1,
                     pricetick=0.001,
+                    history_data=True,
                     net_position=True,
                     gateway_name=self.gateway_name,
                 )
@@ -404,6 +432,53 @@ class FutuGateway(BaseGateway):
 
         return tick
 
+    def query_history(self, req: HistoryRequest) -> List[BarData]:
+        """查询历史数据"""
+        bars: List[BarData] = []
+
+        if req.interval != Interval.MINUTE:
+            self.write_log(f"获取K线数据失败，FUTU接口暂不提供{req.interval.value}级别历史数据")
+            return bars
+
+        symbol: str = convert_symbol_vt2futu(req.symbol, req.exchange)
+        start_date: str = req.start.replace(tzinfo=None).strftime("%Y-%m-%d")
+        end_date: str = req.end.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+
+        ret, history_df, page_req_key = self.quote_ctx.request_history_kline(code=symbol, start=start_date, end=end_date, ktype=KLType.K_1M)  # 每页5个，请求第一页
+        if ret != RET_OK:
+            self.write_log(f"获取K线数据失败，原因：{history_df}")
+            return bars
+
+        while page_req_key != None:  # 请求后面的所有结果
+            ret, data, page_req_key = self.quote_ctx.request_history_kline(code=symbol, start=start_date, end=end_date, ktype=KLType.K_1M, page_req_key=page_req_key) # 请求翻页后的数据
+            if ret == RET_OK:
+                history_df = history_df.append(data,ignore_index=True)
+            else:
+                self.write_log(f"{data}")
+
+        history_df["time_key"] = pd.to_datetime(history_df["time_key"])
+        history_df["time_key"] = history_df["time_key"] - pd.Timedelta(1, "m")
+        history_df["time_key"] = history_df["time_key"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        for ix, row in history_df.iterrows():
+            bar: BarData = BarData(
+                gateway_name=self.gateway_name,
+                symbol=req.symbol,
+                exchange=req.exchange,
+                datetime=generate_datetime(row["time_key"]),
+                interval=Interval.MINUTE,
+                volume=row["volume"],
+                turnover=row["turnover"],
+                open_interest=0,
+                open_price=row["open"],
+                high_price=row["high"],
+                low_price=row["low"],
+                close_price=row["close"] 
+            )
+            bars.append(bar)
+        
+        return bars
+
     def process_quote(self, data) -> None:
         """报价推送"""
         for ix, row in data.iterrows():
@@ -412,7 +487,7 @@ class FutuGateway(BaseGateway):
             date: str = row["data_date"].replace("-", "")
             time: str = row["data_time"]
             dt: datetime = datetime.strptime(f"{date} {time}", "%Y%m%d %H:%M:%S")
-            dt: datetime = CHINA_TZ.localize(dt)
+            dt: datetime = dt.replace(tzinfo=CHINA_TZ)
 
             tick: TickData = self.get_tick(symbol)
             tick.datetime = dt
@@ -436,6 +511,9 @@ class FutuGateway(BaseGateway):
         tick: TickData = self.get_tick(symbol)
 
         d: dict = tick.__dict__
+        if len(data) < 5:
+            return
+
         for i in range(5):
             bid_data = data["Bid"][i]
             ask_data = data["Ask"][i]
@@ -455,12 +533,14 @@ class FutuGateway(BaseGateway):
             if row["order_status"] == OrderStatus.DELETED:
                 continue
 
+            direction, offset = DIRECTION_FUTU2VT[row["trd_side"]]
             symbol, exchange = convert_symbol_futu2vt(row["code"])
             order: OrderData = OrderData(
                 symbol=symbol,
                 exchange=exchange,
                 orderid=str(row["order_id"]),
-                direction=DIRECTION_FUTU2VT[row["trd_side"]],
+                direction=direction,
+                offset=offset,
                 price=float(row["price"]),
                 volume=row["qty"],
                 traded=row["dealt_qty"],
@@ -479,11 +559,13 @@ class FutuGateway(BaseGateway):
                 continue
             self.trades.add(tradeid)
 
+            direction, offset = DIRECTION_FUTU2VT[row["trd_side"]]
             symbol, exchange = convert_symbol_futu2vt(row["code"])
             trade: TradeData = TradeData(
                 symbol=symbol,
                 exchange=exchange,
-                direction=DIRECTION_FUTU2VT[row["trd_side"]],
+                direction=direction,
+                offset=offset,
                 tradeid=tradeid,
                 orderid=row["order_id"],
                 price=float(row["price"]),
@@ -517,5 +599,5 @@ def generate_datetime(s: str) -> datetime:
     else:
         dt: datetime = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
 
-    dt: datetime = CHINA_TZ.localize(dt)
+    dt: datetime = dt.replace(tzinfo=CHINA_TZ)
     return dt
