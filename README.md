@@ -5,19 +5,19 @@
 </p>
 
 <p align="center">
-    <img src ="https://img.shields.io/badge/version-9.81.1-blueviolet.svg"/>
+    <img src ="https://img.shields.io/badge/version-6.3.2808.0-blueviolet.svg"/>
     <img src ="https://img.shields.io/badge/platform-windows|linux|macos-yellow.svg"/>
-    <img src ="https://img.shields.io/badge/python-3.7-blue.svg" />
+    <img src ="https://img.shields.io/badge/python-3.7|3.8|3.9|3.10-blue.svg" />
     <img src ="https://img.shields.io/github/license/vnpy/vnpy.svg?color=orange"/>
 </p>
 
 ## 说明
 
-基于futu-api开发的富途证券港股、美股交易接口。使用时需要注意本接口只支持限价单。
+基于futu-api开发的富途证券港股、期货以及美股交易接口。使用时需要注意本接口只支持限价单。
 
 ## 安装
 
-安装需要基于2.8.0版本以上的[VN Studio](https://www.vnpy.com)。
+安装需要基于3.4.0版本以上的[VN Studio](https://www.vnpy.com)。
 
 直接使用pip命令：
 
