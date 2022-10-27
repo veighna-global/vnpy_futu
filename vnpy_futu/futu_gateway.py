@@ -587,7 +587,7 @@ def convert_symbol_futu2vt(code) -> str:
 
 
 def convert_symbol_vt2futu(symbol, exchange) -> str:
-    """vn.py合约名称转换"""
+    """veighna合约名称转换"""
     futu_exchange: Exchange = EXCHANGE_VT2FUTU[exchange]
     return f"{futu_exchange}.{symbol}"
 
