@@ -114,7 +114,7 @@ class FutuGateway(BaseGateway):
         "环境": [TrdEnv.REAL, TrdEnv.SIMULATE],
     }
 
-    exchanges: List[str]  = list(EXCHANGE_FUTU2VT.values())
+    exchanges: List[str] = list(EXCHANGE_FUTU2VT.values())
 
     def __init__(self, event_engine: EventEngine, gateway_name: str) -> None:
         """构造函数"""
@@ -211,10 +211,10 @@ class FutuGateway(BaseGateway):
 
     def connect_trade(self) -> None:
         """连接交易服务端"""
-        if self.market =="HK":
+        if self.market == "HK":
             self.trade_ctx = OpenSecTradeContext(filter_trdmarket=TrdMarket.HK, host=self.host, port=self.port,)
         elif self.market == "US":
-            self.trade_ctx =OpenSecTradeContext(filter_trdmarket=TrdMarket.US, host=self.host, port=self.port,)
+            self.trade_ctx = OpenSecTradeContext(filter_trdmarket=TrdMarket.US, host=self.host, port=self.port,)
         elif self.market == "HK_FUTURE":
             self.trade_ctx = OpenFutureTradeContext(host=self.host, port=self.port)
 
@@ -450,9 +450,9 @@ class FutuGateway(BaseGateway):
             return bars
 
         while page_req_key != None:  # 请求后面的所有结果
-            ret, data, page_req_key = self.quote_ctx.request_history_kline(code=symbol, start=start_date, end=end_date, ktype=KLType.K_1M, page_req_key=page_req_key) # 请求翻页后的数据
+            ret, data, page_req_key = self.quote_ctx.request_history_kline(code=symbol, start=start_date, end=end_date, ktype=KLType.K_1M, page_req_key=page_req_key)   # 请求翻页后的数据
             if ret == RET_OK:
-                history_df = history_df.append(data,ignore_index=True)
+                history_df = history_df.append(data, ignore_index=True)
             else:
                 self.write_log(f"{data}")
 
@@ -473,10 +473,10 @@ class FutuGateway(BaseGateway):
                 open_price=row["open"],
                 high_price=row["high"],
                 low_price=row["low"],
-                close_price=row["close"] 
+                close_price=row["close"]
             )
             bars.append(bar)
-        
+
         return bars
 
     def process_quote(self, data) -> None:
@@ -587,7 +587,7 @@ def convert_symbol_futu2vt(code) -> str:
 
 
 def convert_symbol_vt2futu(symbol, exchange) -> str:
-    """vn.py合约名称转换"""
+    """veighna合约名称转换"""
     futu_exchange: Exchange = EXCHANGE_VT2FUTU[exchange]
     return f"{futu_exchange}.{symbol}"
 
