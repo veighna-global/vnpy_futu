@@ -54,15 +54,16 @@ from vnpy.trader.utility import ZoneInfo
 # 委托状态映射
 STATUS_FUTU2VT: Dict[OrderStatus, Status] = {
     OrderStatus.NONE: Status.SUBMITTING,
+    OrderStatus.WAITING_SUBMIT: Status.SUBMITTING,
     OrderStatus.SUBMITTING: Status.SUBMITTING,
     OrderStatus.SUBMITTED: Status.NOTTRADED,
     OrderStatus.FILLED_PART: Status.PARTTRADED,
     OrderStatus.FILLED_ALL: Status.ALLTRADED,
-    OrderStatus.CANCELLED_ALL: Status.CANCELLED,
     OrderStatus.CANCELLED_PART: Status.CANCELLED,
-    OrderStatus.SUBMIT_FAILED: Status.REJECTED,
+    OrderStatus.CANCELLED_ALL: Status.CANCELLED,
     OrderStatus.FAILED: Status.REJECTED,
     OrderStatus.DISABLED: Status.CANCELLED,
+    OrderStatus.DELETED: Status.CANCELLED,
 }
 
 # 多空方向映射
@@ -102,7 +103,7 @@ CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
 class FutuGateway(BaseGateway):
     """
-    vn.py用于对接富途证券的交易接口。
+    veighna用于对接富途证券的交易接口。
     """
     default_name: str = "FUTU"
 
